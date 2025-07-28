@@ -20,12 +20,12 @@ ENV UV_COMPILE_BYTECODE=1
 # Ref: https://docs.astral.sh/uv/guides/integration/docker/#caching
 ENV UV_LINK_MODE=copy
 
-# Install dependencies
+# Install dependencies only (not the project itself)
 # Ref: https://docs.astral.sh/uv/guides/integration/docker/#intermediate-layers
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --frozen --no-install-project
+    uv sync --frozen --no-install-project --no-dev
 
 ENV PYTHONPATH=/app
 
@@ -33,9 +33,8 @@ COPY ./pyproject.toml ./uv.lock  /app/
 
 COPY ./app /app/app
 
-# Sync the project
-# Ref: https://docs.astral.sh/uv/guides/integration/docker/#intermediate-layers
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync
+# Copy initialization script and schema
+COPY ./init_db.py /app/
+COPY ./github_events.sql /app/
 
 CMD ["fastapi", "run", "--workers", "4", "app/main.py"]
