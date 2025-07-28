@@ -4,7 +4,7 @@ import React from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip} from 'recharts'
-import { AlertCircle, Users, Bug, BookOpen, Gauge, Trophy } from 'lucide-react'
+import { AlertCircle, Users, Bug, BookOpen, Gauge, Trophy, Search } from 'lucide-react'
 import { motion } from 'framer-motion'
 import ScoreCard from '@/components/dashboard/ScoreCard';
 import ProjectOverview from '@/components/dashboard/ProjectOverview';
@@ -12,22 +12,18 @@ import ReleaseFreq from '@/components/dashboard/ReleaseFreq';
 import OpenClosedIssues from '@/components/dashboard/OpenClosedIssues';
 import NewContributors from '@/components/dashboard/NewContributors';
 import BugFixRate from '@/components/dashboard/BugFixRate';
-
-interface ReleaseDataEntry {
-  month: string;
-  releases: number;
-}
-
-interface IssueDataEntry {
-  month: string;
-  opened: number;
-  closed: number;
-}
-
-interface IssueTypeEntry {
-  name: string;
-  value: number;
-}
+import { calculateOsScore } from "../lib/scoring";
+import {
+  fetchReleaseData,
+  fetchIssueData,
+  fetchIssueTypeData,
+  fetchDashboardMetrics,
+  fetchNewContributors,
+  type ReleaseDataEntry,
+  type IssueDataEntry,
+  type IssueTypeEntry,
+  type DashboardMetrics
+} from "../lib/api";
 
 interface DashboardClientProps {
   initialReleaseData: ReleaseDataEntry[];
@@ -37,9 +33,9 @@ interface DashboardClientProps {
   firstResponseTime: number;
   avgIssueResolution: number;
   prReviewTime: number;
-  // prSuccessRate: string;
   newContributors: number;
   bugFixRate: number;
+  defaultRepo: string;
 }
 
 const COLORS = ['#3B82F6', '#10B981', '#F59E0B']
@@ -49,16 +45,76 @@ export default function DashboardClient(props: DashboardClientProps) {
     initialReleaseData,
     initialIssueData,
     initialIssueTypeData,
-    score,
-    firstResponseTime,
-    avgIssueResolution,
-    prReviewTime,
-    // prSuccessRate,
-    newContributors,
-    bugFixRate
+    score: initialScore,
+    firstResponseTime: initialFirstResponseTime,
+    avgIssueResolution: initialAvgIssueResolution,
+    prReviewTime: initialPrReviewTime,
+    newContributors: initialNewContributors,
+    bugFixRate: initialBugFixRate,
+    defaultRepo
   } = props;
 
-  const [activeMetric, setActiveMetric] = React.useState('score')
+  // State management
+  const [repoName, setRepoName] = React.useState(defaultRepo);
+  const [isLoading, setIsLoading] = React.useState(false);
+  const [activeMetric, setActiveMetric] = React.useState('score');
+  
+  // Data state
+  const [releaseData, setReleaseData] = React.useState(initialReleaseData);
+  const [issueData, setIssueData] = React.useState(initialIssueData);
+  const [issueTypeData, setIssueTypeData] = React.useState(initialIssueTypeData);
+  const [score, setScore] = React.useState(initialScore);
+  const [firstResponseTime, setFirstResponseTime] = React.useState(initialFirstResponseTime);
+  const [avgIssueResolution, setAvgIssueResolution] = React.useState(initialAvgIssueResolution);
+  const [prReviewTime, setPrReviewTime] = React.useState(initialPrReviewTime);
+  const [newContributors, setNewContributors] = React.useState(initialNewContributors);
+  const [bugFixRate, setBugFixRate] = React.useState(initialBugFixRate);
+
+  // Search function
+  const handleSearch = async () => {
+    if (!repoName.trim()) return;
+    
+    setIsLoading(true);
+    try {
+      const [
+        newReleaseData,
+        newIssueData,
+        newIssueTypeData,
+        newMetrics,
+        newContributorsCount
+      ] = await Promise.all([
+        fetchReleaseData(repoName),
+        fetchIssueData(repoName),
+        fetchIssueTypeData(),
+        fetchDashboardMetrics(repoName),
+        fetchNewContributors(repoName)
+      ]);
+
+      const newScore = calculateOsScore(newMetrics);
+
+      // Update all state
+      setReleaseData(newReleaseData);
+      setIssueData(newIssueData);
+      setIssueTypeData(newIssueTypeData);
+      setScore(newScore);
+      setFirstResponseTime(newMetrics.firstResponseTimeReadable);
+      setAvgIssueResolution(newMetrics.avgIssueResolutionReadable);
+      setPrReviewTime(newMetrics.prReviewTimeReadable);
+      setNewContributors(newContributorsCount);
+      setBugFixRate(initialBugFixRate); // Keep this as is since it's not repo-specific
+    } catch (error) {
+      console.error('Error fetching data for new repository:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Handle Enter key press
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleSearch();
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900">
@@ -71,6 +127,44 @@ export default function DashboardClient(props: DashboardClientProps) {
         >
           Open Source Project Dashboard
         </motion.h1>
+
+        {/* Repository Search */}
+        <motion.div
+          className="mb-8 flex flex-col sm:flex-row gap-4 justify-center items-center"
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.1 }}
+        >
+          <div className="relative flex-1 max-w-md">
+            <input
+              type="text"
+              value={repoName}
+              onChange={(e) => setRepoName(e.target.value)}
+              onKeyPress={handleKeyPress}
+              placeholder="Enter repository (e.g., owner/repo)"
+              className="w-full px-4 py-3 pl-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              disabled={isLoading}
+            />
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
+          </div>
+          <button
+            onClick={handleSearch}
+            disabled={isLoading || !repoName.trim()}
+            className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            {isLoading ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                Loading...
+              </>
+            ) : (
+              <>
+                <Search className="h-4 w-4" />
+                Search
+              </>
+            )}
+          </button>
+        </motion.div>
         
         {/* Project Health Summary */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
@@ -95,7 +189,6 @@ export default function DashboardClient(props: DashboardClientProps) {
             firstResponseTime={firstResponseTime} 
             avgIssueResolution={avgIssueResolution} 
             prReviewTime={prReviewTime} 
-            // prSuccessRate={prSuccessRate} 
           />
           </motion.div>
         </div>
@@ -107,7 +200,7 @@ export default function DashboardClient(props: DashboardClientProps) {
             transition={{ duration: 0.5, delay: 0.4 }}
           >
 
-          <ReleaseFreq releaseData={initialReleaseData} />
+          <ReleaseFreq releaseData={releaseData} />
 
           </motion.div>
           
@@ -117,7 +210,7 @@ export default function DashboardClient(props: DashboardClientProps) {
             transition={{ duration: 0.5, delay: 0.4 }}
           >
 
-          <OpenClosedIssues issueData={initialIssueData} />
+          <OpenClosedIssues issueData={issueData} />
 
           </motion.div>
         </div>
@@ -274,7 +367,7 @@ export default function DashboardClient(props: DashboardClientProps) {
                 <ResponsiveContainer width="100%" height={200}>
                   <PieChart>
                     <Pie
-                      data={initialIssueTypeData}
+                      data={issueTypeData}
                       cx="50%"
                       cy="50%"
                       labelLine={false}
@@ -282,7 +375,7 @@ export default function DashboardClient(props: DashboardClientProps) {
                       fill="#8884d8"
                       dataKey="value"
                     >
-                      {initialIssueTypeData.map((entry, index) => (
+                      {issueTypeData.map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                       ))}
                     </Pie>
@@ -290,7 +383,7 @@ export default function DashboardClient(props: DashboardClientProps) {
                   </PieChart>
                 </ResponsiveContainer>
                 <div className="flex justify-center mt-4">
-                  {initialIssueTypeData.map((entry, index) => (
+                  {issueTypeData.map((entry, index) => (
                     <div key={`legend-${index}`} className="flex items-center mx-2">
                       <div className="w-3 h-3 rounded-full mr-1" style={{ backgroundColor: COLORS[index % COLORS.length] }}></div>
                       <span className="text-sm text-gray-600">{entry.name}</span>
