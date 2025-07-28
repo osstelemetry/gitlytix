@@ -1,6 +1,24 @@
 version: "3.9"
 
 services:
+  # Database initialization service
+  db-init:
+    build:
+      context: ./backend
+    container_name: db_init
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    environment:
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_HTTP_PORT=8123
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=clickhouse123
+      - CLICKHOUSE_DB=default
+    command: ["python", "init_db.py"]
+    networks:
+      - app_network
+
   backend:
     build:
       context: ./backend
@@ -8,16 +26,32 @@ services:
     ports:
       - "8000:8000"
     depends_on:
-      - clickhouse
+      - db-init
     environment:
       - CLICKHOUSE_HOST=clickhouse
-      - CLICKHOUSE_PORT=9000
+      - CLICKHOUSE_HTTP_PORT=8123
       - CLICKHOUSE_USER=default
-      - CLICKHOUSE_PASSWORD=default
+      - CLICKHOUSE_PASSWORD=clickhouse123
       - CLICKHOUSE_DB=default
       - UV_COMPILE_BYTECODE=1
       - UV_LINK_MODE=copy
     command: ["fastapi", "run", "--workers", "4", "app/main.py"]
+    networks:
+      - app_network
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: http://backend:8000
+    container_name: frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=http://backend:8000
     networks:
       - app_network
 
@@ -26,16 +60,27 @@ services:
     container_name: clickhouse_db
     restart: always
     ports:
-      - "9000:9000" # Native TCP interface
+      - "9001:9000" # Native TCP interface mapped to host port 9001
+      - "8123:8123" # HTTP interface
     environment:
       - CLICKHOUSE_DB=default
       - CLICKHOUSE_USER=default
-      - CLICKHOUSE_PASSWORD=default
+      - CLICKHOUSE_PASSWORD=clickhouse123
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
     volumes:
       - clickhouse_data:/var/lib/clickhouse
       - clickhouse_logs:/var/log/clickhouse-server
     networks:
       - app_network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
 volumes:
   clickhouse_data:
