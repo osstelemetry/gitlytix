@@ -1,3 +1,40 @@
+# GitLytix
+
+GitHub Analytics Dashboard for Open Source Project Metrics.
+
+## Quick Start
+
+### Using Docker Compose (
+
+```bash
+# Start all services (Frontend, Backend, Database)
+./start.sh
+
+# Or manually:
+docker compose up --build
+```
+
+This will start:
+
+- **Frontend (Next.js)**: http://localhost:3000
+- **Backend (FastAPI)**: http://localhost:8000
+    - **Backend OpenAPI Specs**: http://localhost:8000/docs
+- **ClickHouse Database**: localhost:9001
+- **Database initialization**: Automatically creates table and populates with 1000 dummy events
+
+
+### Development
+
+```bash
+# View logs for specific service
+docker compose logs -f frontend
+docker compose logs -f backend
+
+# Stop all services
+docker compose down
+```
+
+
 # How We Calculate the OS Score
 
 The Open Source (OS) Score is a composite metric designed to provide assessment of a project's health and responsiveness. It ranges from 0 to 100, where a higher score indicates better performance.
