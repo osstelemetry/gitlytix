@@ -12,12 +12,12 @@ class Settings(BaseSettings):
     )
     API_V1_STR: str = "/api/v1"
     PROJECT_NAME: str = "Gitlytix"
-    CLICKHOUSE_USER: str = "explorer"
-    CLICKHOUSE_PASSWORD: str = ""  # No password for the explorer user
-    CLICKHOUSE_HOST: str = ""
-    CLICKHOUSE_PORT: int = 9440  # Default secure port
+    CLICKHOUSE_USER: str = "default"
+    CLICKHOUSE_PASSWORD: str = "clickhouse123" 
+    CLICKHOUSE_HOST: str = "clickhouse"  # Use Docker service name
+    CLICKHOUSE_PORT: int = 9000  # Native protocol port
     CLICKHOUSE_DB: str = "default"
-    CLICKHOUSE_SECURE: bool = True
+    CLICKHOUSE_SECURE: bool = False  # Set to False for Docker development setup
     
     @computed_field  # type: ignore[prop-decorator]
     @property
