@@ -1,4 +1,4 @@
-import type { DashboardMetrics } from '../app/page';
+import type { DashboardMetrics } from './api';
 
 interface MetricConfig {
   weight: number;
