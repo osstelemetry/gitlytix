@@ -7,6 +7,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import Session
 
 from app.repositories.base import RepositoryError
+from app.repositories.issues import fetch_average_resolution_time
 
 
 def fetch_data_quality_metrics(
@@ -42,52 +43,18 @@ def fetch_bug_resolution_metrics(
     end_date: str,
 ) -> Tuple[Optional[float], Optional[int]]:
     """Return average bug resolution seconds and total bug count."""
-    query = text(
-        """
-        WITH bug_issues AS (
-            SELECT 
-                repo_name,
-                number,
-                minIf(created_at, action = 'opened') as opened_at,
-                maxIf(created_at, action = 'closed') as closed_at,
-                max(hasAny(labels, ['bug'])) as is_bug
-            FROM github_events
-            WHERE event_type = 'IssuesEvent'
-              AND repo_name = :repo_name
-              AND action IN ('opened', 'closed')
-              AND created_at BETWEEN :start_date AND :end_date
-            GROUP BY repo_name, number
-            HAVING is_bug = 1 AND closed_at IS NOT NULL AND opened_at IS NOT NULL
-        ),
-        resolution_times AS (
-            SELECT
-                repo_name,
-                dateDiff('second', opened_at, closed_at) as resolution_time_seconds
-            FROM bug_issues
-            WHERE resolution_time_seconds > 0
-              AND resolution_time_seconds < 31536000
-        )
-        SELECT
-            repo_name,
-            avg(resolution_time_seconds) as avg_seconds,
-            count() as total_bugs
-        FROM resolution_times
-        GROUP BY repo_name
-        """
-    )
-
     try:
-        result = session.execute(
-            query,
-            {"repo_name": repo_name, "start_date": start_date, "end_date": end_date},
+        return fetch_average_resolution_time(
+            session,
+            repo_name,
+            start_date,
+            end_date,
+            label_filters=["bug"],
         )
-        row = result.fetchone()
+    except RepositoryError:
+        raise
     except SQLAlchemyError as exc:
         raise RepositoryError("Failed to calculate bug resolution metrics") from exc
-
-    if not row or row[1] is None:
-        return None, None
-    return float(row[1]), int(row[2])
 
 
 def fetch_release_frequency(
@@ -162,4 +129,3 @@ def fetch_new_contributors(
         return result.fetchall()
     except SQLAlchemyError as exc:
         raise RepositoryError("Failed to fetch new contributor data") from exc
-

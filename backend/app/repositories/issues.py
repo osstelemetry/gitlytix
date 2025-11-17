@@ -116,10 +116,15 @@ def fetch_average_resolution_time(
     repo_name: str,
     start_date: str,
     end_date: str,
+    label_filters: Optional[Sequence[str]] = None,
 ) -> Tuple[Optional[float], Optional[int]]:
     """Return average resolution seconds and total resolved issues for the window."""
+    label_condition = ""
+    if label_filters:
+        label_condition = "              AND hasAny(labels, :label_filters)\n"
+
     query = text(
-        """
+        f"""
         WITH issue_events AS (
             SELECT 
                 repo_name,
@@ -132,23 +137,25 @@ def fetch_average_resolution_time(
               AND repo_name = :repo_name
               AND action IN ('opened', 'closed')
               AND created_at BETWEEN :start_date AND :end_date
-        ),
+{label_condition}        ),
         issue_timings AS (
             SELECT
                 repo_name,
                 number,
                 minIf(created_at, action = 'opened') as opened_at,
-                maxIf(created_at, action = 'closed') as closed_at
+                maxIf(created_at, action = 'closed') as closed_at,
+                countIf(action = 'closed') as closed_events
             FROM issue_events
             GROUP BY repo_name, number
-            HAVING opened_at IS NOT NULL AND closed_at IS NOT NULL
+            HAVING opened_at IS NOT NULL
+               AND closed_events > 0
         ),
         resolution_times AS (
             SELECT
                 repo_name,
                 dateDiff('second', opened_at, closed_at) as resolution_time_seconds
             FROM issue_timings
-            WHERE resolution_time_seconds > 0
+            WHERE closed_at > opened_at
         )
         SELECT
             repo_name,
@@ -159,11 +166,12 @@ def fetch_average_resolution_time(
         """
     )
 
+    params = {"repo_name": repo_name, "start_date": start_date, "end_date": end_date}
+    if label_filters:
+        params["label_filters"] = list(label_filters)
+
     try:
-        result = session.execute(
-            query,
-            {"repo_name": repo_name, "start_date": start_date, "end_date": end_date},
-        )
+        result = session.execute(query, params)
         row = result.fetchone()
     except SQLAlchemyError as exc:
         raise RepositoryError("Failed to calculate issue resolution time") from exc

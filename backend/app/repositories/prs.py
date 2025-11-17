@@ -12,6 +12,7 @@ from app.repositories.base import RepositoryError
 def fetch_pr_success_rate(
     session: Session,
     repo_name: str,
+    start_date: str,
 ) -> Optional[Tuple[int, int, float]]:
     """Return total closed PRs, merged count, and success percentage."""
     query = text(
@@ -25,6 +26,7 @@ def fetch_pr_success_rate(
             FROM github_events
             WHERE event_type = 'PullRequestEvent'
               AND repo_name = :repo_name
+              AND created_at >= :start_date
             GROUP BY number
         )
         SELECT
@@ -37,7 +39,10 @@ def fetch_pr_success_rate(
     )
 
     try:
-        result = session.execute(query, {"repo_name": repo_name})
+        result = session.execute(
+            query,
+            {"repo_name": repo_name, "start_date": start_date},
+        )
         row = result.fetchone()
     except SQLAlchemyError as exc:
         raise RepositoryError("Failed to calculate PR success rate") from exc
@@ -121,6 +126,7 @@ def fetch_avg_pr_closing_time(
 def fetch_pr_review_time(
     session: Session,
     repo_name: str,
+    start_date: str,
 ) -> Tuple[Optional[float], int]:
     """Return average seconds to first review and reviewed PR count."""
     query = text(
@@ -134,6 +140,7 @@ def fetch_pr_review_time(
             WHERE event_type = 'PullRequestEvent' 
               AND action = 'opened' 
               AND repo_name = :repo_name
+              AND created_at >= :start_date
             GROUP BY number
         ),
         review_event_times AS (
@@ -144,6 +151,7 @@ def fetch_pr_review_time(
             FROM github_events
             WHERE repo_name = :repo_name 
               AND event_type IN ('PullRequestReviewCommentEvent', 'PullRequestReviewEvent')
+              AND created_at >= :start_date
         ),
         first_review_times AS (
             SELECT
@@ -163,7 +171,10 @@ def fetch_pr_review_time(
     )
 
     try:
-        result = session.execute(query, {"repo_name": repo_name})
+        result = session.execute(
+            query,
+            {"repo_name": repo_name, "start_date": start_date},
+        )
         row = result.fetchone()
     except SQLAlchemyError as exc:
         raise RepositoryError("Failed to calculate PR review time") from exc
