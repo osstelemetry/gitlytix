@@ -4,14 +4,23 @@ GitHub Analytics Dashboard for Open Source Project Metrics.
 
 ## Quick Start
 
-### Using Docker Compose (
+### Using Docker Compose
 
 ```bash
 # Start all services (Frontend, Backend, Database)
-./start.sh
+make start
 
-# Or manually:
-docker compose up --build
+# Build images without starting containers
+make build
+
+# (Re)seed ClickHouse demo data (requires ClickHouse running; run `make start` first if needed)
+make seed
+
+# Stop everything
+make stop
+
+# Or use the start script that checks if db is avaiable
+./start.sh
 ```
 
 This will start:
@@ -30,7 +39,11 @@ This will start:
 docker compose logs -f frontend
 docker compose logs -f backend
 
-# Stop all services
+# Rerun seed data against an already running ClickHouse instance
+make seed
+
+# Bring stack up/down directly (equivalent to make targets)
+docker compose up -d
 docker compose down
 ```
 

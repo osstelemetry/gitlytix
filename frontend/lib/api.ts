@@ -23,40 +23,49 @@ export interface IssuesOpenClosedResponse {
 }
 
 export interface DashboardMetrics {
-  firstResponseTimeReadable: number;
-  avgIssueResolutionReadable: number;
-  prReviewTimeReadable: number;
+  firstResponseTimeReadable: string;
+  avgIssueResolutionReadable: string;
+  prReviewTimeReadable: string;
+  bugFixResolutionReadable: string;
   firstResponseTimeSeconds: number;
   avgIssueResolutionSeconds: number;
   prReviewTimeSeconds: number;
+  bugFixResolutionSeconds: number;
 }
 
 // Interface for the PR Review Time API response
 export interface PrReviewTimeResponse {
   average_review_time_seconds: number;
-  average_review_time_readable: number;
+  average_review_time_readable: string;
 }
 
 // Interface for the First Response Time API response
 export interface IssueFirstResponseTimeResponse {
   average_response_time_seconds: number;
-  average_response_time_readable: number;
+  average_response_time_readable: string;
 }
 
 // Interface for the Avg Issue Resolution Time API response
 export interface IssueAvgResolutionTimeResponse {
   average_resolution_time_seconds: number;
-  average_resolution_time_readable: number;
+  average_resolution_time_readable: string;
 }
 
 export interface NewContributors {
   new_contributors_count: number;
 }
 
-// Get API base URL from environment variable with fallback
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-
-console.log("API_BASE_URL resolved to:", API_BASE_URL);
+function getApiBaseUrl(): string {
+  const isServer = typeof window === 'undefined';
+  
+  if (isServer) {
+    // Server-side: use Docker network hostname
+    return process.env.NEXT_PUBLIC_API_URL || "http://backend:8000";
+  } else {
+    // Client-side: use localhost 
+    return "http://localhost:8000";
+  }
+}
 
 // Generic data fetching function
 export async function fetchData<T>(
@@ -64,6 +73,7 @@ export async function fetchData<T>(
   mockData: T,
   delay: number = 500
 ): Promise<T> {
+  const API_BASE_URL = getApiBaseUrl();
   const fullUrl = API_BASE_URL + url;
   console.log(`Fetching ${fullUrl}...`);
   try {
@@ -149,12 +159,14 @@ export async function fetchIssueTypeData(): Promise<IssueTypeEntry[]> {
 
 export async function fetchDashboardMetrics(repoName: string): Promise<DashboardMetrics> {
   const mockMetrics: DashboardMetrics = {
-    firstResponseTimeReadable: 2.1,
-    avgIssueResolutionReadable: 3.0,
-    prReviewTimeReadable: 1.5,
+    firstResponseTimeReadable: "2 days",
+    avgIssueResolutionReadable: "3 days",
+    prReviewTimeReadable: "1.5 days",
+    bugFixResolutionReadable: "2.5 days",
     firstResponseTimeSeconds: 2.1,
     avgIssueResolutionSeconds: 3.0,
     prReviewTimeSeconds: 1.5,
+    bugFixResolutionSeconds: 2.5,
   };
 
   try {
@@ -188,14 +200,26 @@ export async function fetchDashboardMetrics(repoName: string): Promise<Dashboard
       100
     );
 
+    // Fetch bug-only issue resolution time
+    const bugResolutionData = await fetchData<IssueAvgResolutionTimeResponse>(
+      `/api/v1/stats/issues/avg-resolution-time?repo_name=${encodeURIComponent(repoName)}&label=bug`,
+      {
+        average_resolution_time_seconds: mockMetrics.bugFixResolutionSeconds,
+        average_resolution_time_readable: mockMetrics.bugFixResolutionReadable,
+      },
+      100
+    );
+
     // Combine metrics
     return {
       firstResponseTimeReadable: firstResponseData.average_response_time_readable,
       avgIssueResolutionReadable: issueResolutionData.average_resolution_time_readable,
       prReviewTimeReadable: prReviewData.average_review_time_readable,
+      bugFixResolutionReadable: bugResolutionData.average_resolution_time_readable,
       firstResponseTimeSeconds: firstResponseData.average_response_time_seconds,
       avgIssueResolutionSeconds: issueResolutionData.average_resolution_time_seconds,
       prReviewTimeSeconds: prReviewData.average_review_time_seconds,
+      bugFixResolutionSeconds: bugResolutionData.average_resolution_time_seconds,
     };
   } catch (error) {
     console.error("Error fetching dashboard metrics, using mock data:", error);

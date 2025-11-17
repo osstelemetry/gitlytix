@@ -30,11 +30,11 @@ interface DashboardClientProps {
   initialIssueData: IssueDataEntry[];
   initialIssueTypeData: IssueTypeEntry[];
   score: number;
-  firstResponseTime: number;
-  avgIssueResolution: number;
-  prReviewTime: number;
+  firstResponseTime: string;
+  avgIssueResolution: string;
+  prReviewTime: string;
   newContributors: number;
-  bugFixRate: number;
+  bugFixRate: string;
   defaultRepo: string;
 }
 
@@ -101,7 +101,7 @@ export default function DashboardClient(props: DashboardClientProps) {
       setAvgIssueResolution(newMetrics.avgIssueResolutionReadable);
       setPrReviewTime(newMetrics.prReviewTimeReadable);
       setNewContributors(newContributorsCount);
-      setBugFixRate(initialBugFixRate); // Keep this as is since it's not repo-specific
+      setBugFixRate(newMetrics.bugFixResolutionReadable);
     } catch (error) {
       console.error('Error fetching data for new repository:', error);
     } finally {

@@ -309,16 +309,13 @@ def generate_dummy_data(num_events: int = 1000) -> List[tuple]:
     num_issues = int((issue_weight / total_weight) * remaining_events)
     
     # Generate PRs first
-    for i in range(num_prs):
+    for _ in range(num_prs):
         created_at = base_time + timedelta(
             minutes=random.randint(0, 90 * 24 * 60)  # Random time in last 90 days
         )
-        updated_at = created_at + timedelta(minutes=random.randint(0, 60))
-        
         repo_name = random.choice(SAMPLE_REPOS)
         actor_login = random.choice(SAMPLE_USERS)
         
-        action = random.choice(['opened', 'closed', 'reopened', 'synchronize'])
         pr_titles = [
             "Fix bug in authentication module",
             "Add new feature for user management",
@@ -332,10 +329,6 @@ def generate_dummy_data(num_events: int = 1000) -> List[tuple]:
         title = random.choice(pr_titles)
         body = f"This PR addresses important changes in the codebase. Includes {random.randint(1, 10)} commits."
         number = random.randint(1, 1000)
-        state = 'closed' if action == 'closed' else 'open'
-        
-        closed_at = created_at + timedelta(hours=random.randint(1, 168)) if action == 'closed' else default_datetime
-        merged_at = closed_at if action == 'closed' and random.random() > 0.3 else default_datetime
         
         ref = random.choice(['main', 'develop', 'feature-branch', 'refs/heads/main', 'refs/heads/feature/new-auth'])
         ref_type = 'branch'
@@ -352,13 +345,12 @@ def generate_dummy_data(num_events: int = 1000) -> List[tuple]:
         assignees = [random.choice(SAMPLE_USERS)] if random.random() > 0.8 else []
         comments_count = random.randint(0, 20)
         author_association = random.choice(['CONTRIBUTOR', 'OWNER', 'COLLABORATOR', 'MEMBER', 'NONE'])
-        merge_commit_sha = f"sha{random.randint(1000000, 9999999)}" if merged_at != default_datetime else ''
+        merge_commit_sha = f"sha{random.randint(1000000, 9999999)}"
         requested_reviewers = [random.choice(SAMPLE_USERS)] if random.random() > 0.6 else []
         requested_teams = []
-        merged = 1 if merged_at != default_datetime else 0
         mergeable = random.randint(0, 1)
         mergeable_state = random.choice(['clean', 'dirty', 'unknown', 'unstable'])
-        merged_by = random.choice(SAMPLE_USERS) if merged == 1 else ''
+        merged_by_candidate = random.choice(SAMPLE_USERS)
         review_comments = random.randint(0, 15)
         maintainer_can_modify = random.randint(0, 1)
         commits = random.randint(1, 8)
@@ -372,55 +364,92 @@ def generate_dummy_data(num_events: int = 1000) -> List[tuple]:
         release_name = ''
         review_state = 'none'
         
-        pr_event = (
-            created_at,  # file_time
-            'PullRequestEvent',
-            actor_login,
-            repo_name,
-            created_at,  # created_at
-            updated_at,  # updated_at  
-            action,
-            0,  # comment_id
-            body,
-            '',  # path
-            0,  # position
-            0,  # line
-            ref,  # ref
-            ref_type,  # ref_type
-            creator_user_login,  # creator_user_login
-            number,
-            title,
-            labels,  # labels
-            state,
-            locked,  # locked
-            assignee,  # assignee
-            assignees,  # assignees
-            comments_count,  # comments
-            author_association,  # author_association
-            closed_at,  # closed_at
-            merged_at,  # merged_at
-            merge_commit_sha,  # merge_commit_sha
-            requested_reviewers,  # requested_reviewers
-            requested_teams,  # requested_teams
-            merged,  # merged
-            mergeable,  # mergeable
-            mergeable_state,  # mergeable_state
-            merged_by,  # merged_by
-            review_comments,  # review_comments
-            maintainer_can_modify,  # maintainer_can_modify
-            commits,  # commits
-            additions,  # additions
-            deletions,  # deletions
-            changed_files,  # changed_files
-            commit_id,  # commit_id
-            original_commit_id,  # original_commit_id
-            member_login,  # member_login
-            release_tag_name,  # release_tag_name
-            release_name,  # release_name
-            review_state  # review_state
+        is_closed = random.random() > 0.25
+        close_delay_hours = random.randint(4, 240)
+        closed_at = created_at + timedelta(hours=close_delay_hours) if is_closed else None
+        if closed_at and closed_at > datetime.now():
+            closed_at = datetime.now() - timedelta(hours=random.randint(1, 6))
+        merged_flag = 1 if closed_at and random.random() > 0.5 else 0
+        merged_at = closed_at if merged_flag else default_datetime
+        closing_actor = random.choice(SAMPLE_USERS) if closed_at else actor_login
+        
+        def build_pr_event(event_time, action_value, state_value, closed_value, merged_value, merged_flag_value, actor_value, body_value):
+            updated_value = event_time + timedelta(minutes=random.randint(0, 60))
+            return (
+                event_time,
+                'PullRequestEvent',
+                actor_value,
+                repo_name,
+                event_time,
+                updated_value,
+                action_value,
+                0,
+                body_value,
+                '',
+                0,
+                0,
+                ref,
+                ref_type,
+                creator_user_login,
+                number,
+                title,
+                labels,
+                state_value,
+                locked,
+                assignee,
+                assignees,
+                comments_count,
+                author_association,
+                closed_value,
+                merged_value,
+                merge_commit_sha if merged_flag_value else '',
+                requested_reviewers,
+                requested_teams,
+                merged_flag_value,
+                mergeable,
+                mergeable_state,
+                merged_by_candidate if merged_flag_value else '',
+                review_comments,
+                maintainer_can_modify,
+                commits,
+                additions,
+                deletions,
+                changed_files,
+                commit_id,
+                original_commit_id,
+                member_login,
+                release_tag_name,
+                release_name,
+                review_state
+            )
+        
+        # Open event
+        pr_issue_events.append(
+            build_pr_event(
+                created_at,
+                'opened',
+                'open',
+                default_datetime,
+                default_datetime,
+                0,
+                actor_login,
+                body
+            )
         )
         
-        pr_issue_events.append(pr_event)
+        if closed_at:
+            pr_issue_events.append(
+                build_pr_event(
+                    closed_at,
+                    'closed',
+                    'closed',
+                    closed_at,
+                    merged_at,
+                    merged_flag,
+                    closing_actor,
+                    f"Closing PR #{number}"
+                )
+            )
         
         # Track this PR for review events
         pr_events.append({
@@ -429,20 +458,17 @@ def generate_dummy_data(num_events: int = 1000) -> List[tuple]:
             'created_at': created_at,
             'title': title,
             'author': actor_login,
-            'state': state
+            'state': 'closed' if closed_at else 'open'
         })
     
     # Generate Issues next
-    for i in range(num_issues):
+    for _ in range(num_issues):
         created_at = base_time + timedelta(
             minutes=random.randint(0, 90 * 24 * 60)  # Random time in last 90 days
         )
-        updated_at = created_at + timedelta(minutes=random.randint(0, 60))
-        
         repo_name = random.choice(SAMPLE_REPOS)
         actor_login = random.choice(SAMPLE_USERS)
         
-        action = random.choice(['opened', 'closed', 'reopened'])
         issue_titles = [
             "Bug: Application crashes on startup",
             "Feature request: Dark mode support",
@@ -454,9 +480,6 @@ def generate_dummy_data(num_events: int = 1000) -> List[tuple]:
         title = random.choice(issue_titles)
         body = f"This issue needs attention. Priority: {random.choice(['high', 'medium', 'low'])}"
         number = random.randint(1, 1000)
-        state = 'closed' if action == 'closed' else 'open'
-        
-        closed_at = created_at + timedelta(hours=random.randint(1, 168)) if action == 'closed' else default_datetime
         
         ref = ''
         ref_type = 'none'
@@ -474,55 +497,85 @@ def generate_dummy_data(num_events: int = 1000) -> List[tuple]:
         comments_count = random.randint(0, 20)
         author_association = random.choice(['CONTRIBUTOR', 'OWNER', 'COLLABORATOR', 'MEMBER', 'NONE'])
         
-        issue_event = (
-            created_at,  # file_time
-            'IssuesEvent',
-            actor_login,
-            repo_name,
-            created_at,  # created_at
-            updated_at,  # updated_at  
-            action,
-            0,  # comment_id
-            body,
-            '',  # path
-            0,  # position
-            0,  # line
-            ref,  # ref
-            ref_type,  # ref_type
-            creator_user_login,  # creator_user_login
-            number,
-            title,
-            labels,  # labels
-            state,
-            locked,  # locked
-            assignee,  # assignee
-            assignees,  # assignees
-            comments_count,  # comments
-            author_association,  # author_association
-            closed_at,  # closed_at
-            default_datetime,  # merged_at
-            '',  # merge_commit_sha
-            [],  # requested_reviewers
-            [],  # requested_teams
-            0,  # merged
-            0,  # mergeable
-            'unknown',  # mergeable_state
-            '',  # merged_by
-            0,  # review_comments
-            0,  # maintainer_can_modify
-            0,  # commits
-            0,  # additions
-            0,  # deletions
-            0,  # changed_files
-            f"commit{random.randint(1000000, 9999999)}",  # commit_id
-            f"original{random.randint(1000000, 9999999)}",  # original_commit_id
-            '',  # member_login
-            '',  # release_tag_name
-            '',  # release_name
-            'none'  # review_state
+        is_closed = random.random() > 0.35
+        close_delay_hours = random.randint(2, 240)
+        closed_at = created_at + timedelta(hours=close_delay_hours) if is_closed else None
+        if closed_at and closed_at > datetime.now():
+            closed_at = datetime.now() - timedelta(hours=random.randint(1, 6))
+        closing_actor = random.choice(SAMPLE_USERS) if closed_at else actor_login
+        
+        def build_issue_event(event_time, action_value, state_value, closed_value, actor_value, body_value):
+            updated_value = event_time + timedelta(minutes=random.randint(0, 60))
+            return (
+                event_time,
+                'IssuesEvent',
+                actor_value,
+                repo_name,
+                event_time,
+                updated_value,
+                action_value,
+                0,
+                body_value,
+                '',
+                0,
+                0,
+                ref,
+                ref_type,
+                creator_user_login,
+                number,
+                title,
+                labels,
+                state_value,
+                locked,
+                assignee,
+                assignees,
+                comments_count,
+                author_association,
+                closed_value,
+                default_datetime,
+                '',
+                [],
+                [],
+                0,
+                0,
+                'unknown',
+                '',
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                f"commit{random.randint(1000000, 9999999)}",
+                f"original{random.randint(1000000, 9999999)}",
+                '',
+                '',
+                '',
+                'none'
+            )
+        
+        pr_issue_events.append(
+            build_issue_event(
+                created_at,
+                'opened',
+                'open',
+                default_datetime,
+                actor_login,
+                body
+            )
         )
         
-        pr_issue_events.append(issue_event)
+        if closed_at:
+            pr_issue_events.append(
+                build_issue_event(
+                    closed_at,
+                    'closed',
+                    'closed',
+                    closed_at,
+                    closing_actor,
+                    f"Closing issue #{number}"
+                )
+            )
         
         # Track this Issue for comment events
         issue_events.append({
@@ -531,7 +584,7 @@ def generate_dummy_data(num_events: int = 1000) -> List[tuple]:
             'created_at': created_at,
             'title': title,
             'author': actor_login,
-            'state': state
+            'state': 'closed' if closed_at else 'open'
         })
     
     # Add PR and Issue events

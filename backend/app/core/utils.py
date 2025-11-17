@@ -1,4 +1,6 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
+
+DEFAULT_MONTH_WINDOW = 6
 
 def format_time_difference(seconds):
     """Format a time difference in seconds to a human-readable string."""
@@ -43,3 +45,9 @@ def format_time_delta(delta: timedelta) -> str:
     
     return " ".join(parts[:2]) if parts else "0 seconds"
 
+
+def default_start_date(months: int = DEFAULT_MONTH_WINDOW, end: datetime | None = None) -> str:
+    """Return ISO date string representing `months` months ago (approximate 30 days per month)."""
+    end_dt = end or datetime.utcnow()
+    start_dt = end_dt - timedelta(days=30 * months)
+    return start_dt.strftime("%Y-%m-%d")
