@@ -23,30 +23,32 @@ export interface IssuesOpenClosedResponse {
 }
 
 export interface DashboardMetrics {
-  firstResponseTimeReadable: number;
-  avgIssueResolutionReadable: number;
-  prReviewTimeReadable: number;
+  firstResponseTimeReadable: string;
+  avgIssueResolutionReadable: string;
+  prReviewTimeReadable: string;
+  bugFixResolutionReadable: string;
   firstResponseTimeSeconds: number;
   avgIssueResolutionSeconds: number;
   prReviewTimeSeconds: number;
+  bugFixResolutionSeconds: number;
 }
 
 // Interface for the PR Review Time API response
 export interface PrReviewTimeResponse {
   average_review_time_seconds: number;
-  average_review_time_readable: number;
+  average_review_time_readable: string;
 }
 
 // Interface for the First Response Time API response
 export interface IssueFirstResponseTimeResponse {
   average_response_time_seconds: number;
-  average_response_time_readable: number;
+  average_response_time_readable: string;
 }
 
 // Interface for the Avg Issue Resolution Time API response
 export interface IssueAvgResolutionTimeResponse {
   average_resolution_time_seconds: number;
-  average_resolution_time_readable: number;
+  average_resolution_time_readable: string;
 }
 
 export interface NewContributors {
@@ -157,12 +159,14 @@ export async function fetchIssueTypeData(): Promise<IssueTypeEntry[]> {
 
 export async function fetchDashboardMetrics(repoName: string): Promise<DashboardMetrics> {
   const mockMetrics: DashboardMetrics = {
-    firstResponseTimeReadable: 2.1,
-    avgIssueResolutionReadable: 3.0,
-    prReviewTimeReadable: 1.5,
+    firstResponseTimeReadable: "2 days",
+    avgIssueResolutionReadable: "3 days",
+    prReviewTimeReadable: "1.5 days",
+    bugFixResolutionReadable: "2.5 days",
     firstResponseTimeSeconds: 2.1,
     avgIssueResolutionSeconds: 3.0,
     prReviewTimeSeconds: 1.5,
+    bugFixResolutionSeconds: 2.5,
   };
 
   try {
@@ -196,14 +200,26 @@ export async function fetchDashboardMetrics(repoName: string): Promise<Dashboard
       100
     );
 
+    // Fetch bug-only issue resolution time
+    const bugResolutionData = await fetchData<IssueAvgResolutionTimeResponse>(
+      `/api/v1/stats/issues/avg-resolution-time?repo_name=${encodeURIComponent(repoName)}&label=bug`,
+      {
+        average_resolution_time_seconds: mockMetrics.bugFixResolutionSeconds,
+        average_resolution_time_readable: mockMetrics.bugFixResolutionReadable,
+      },
+      100
+    );
+
     // Combine metrics
     return {
       firstResponseTimeReadable: firstResponseData.average_response_time_readable,
       avgIssueResolutionReadable: issueResolutionData.average_resolution_time_readable,
       prReviewTimeReadable: prReviewData.average_review_time_readable,
+      bugFixResolutionReadable: bugResolutionData.average_resolution_time_readable,
       firstResponseTimeSeconds: firstResponseData.average_response_time_seconds,
       avgIssueResolutionSeconds: issueResolutionData.average_resolution_time_seconds,
       prReviewTimeSeconds: prReviewData.average_review_time_seconds,
+      bugFixResolutionSeconds: bugResolutionData.average_resolution_time_seconds,
     };
   } catch (error) {
     console.error("Error fetching dashboard metrics, using mock data:", error);

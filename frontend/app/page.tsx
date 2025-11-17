@@ -40,7 +40,7 @@ export default async function Page() {
       avgIssueResolution={rawMetrics.avgIssueResolutionReadable}
       prReviewTime={rawMetrics.prReviewTimeReadable}
       newContributors={newContributorsCount}
-      bugFixRate={2}
+      bugFixRate={rawMetrics.bugFixResolutionReadable}
       defaultRepo={defaultRepo}
     />
   );

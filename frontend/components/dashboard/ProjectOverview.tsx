@@ -4,9 +4,9 @@ import { motion } from "framer-motion";
 import { Activity, CheckCircle2, Clock, GitPullRequest } from 'lucide-react'
 
 interface ProjectOverviewProps {
-    firstResponseTime: number;
-    avgIssueResolution: number;
-    prReviewTime: number;
+    firstResponseTime: string;
+    avgIssueResolution: string;
+    prReviewTime: string;
     // prSuccessRate: string;
   }
   
