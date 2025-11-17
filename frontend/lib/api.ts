@@ -53,10 +53,17 @@ export interface NewContributors {
   new_contributors_count: number;
 }
 
-// Get API base URL from environment variable with fallback
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-
-console.log("API_BASE_URL resolved to:", API_BASE_URL);
+function getApiBaseUrl(): string {
+  const isServer = typeof window === 'undefined';
+  
+  if (isServer) {
+    // Server-side: use Docker network hostname
+    return process.env.NEXT_PUBLIC_API_URL || "http://backend:8000";
+  } else {
+    // Client-side: use localhost 
+    return "http://localhost:8000";
+  }
+}
 
 // Generic data fetching function
 export async function fetchData<T>(
@@ -64,6 +71,7 @@ export async function fetchData<T>(
   mockData: T,
   delay: number = 500
 ): Promise<T> {
+  const API_BASE_URL = getApiBaseUrl();
   const fullUrl = API_BASE_URL + url;
   console.log(`Fetching ${fullUrl}...`);
   try {
