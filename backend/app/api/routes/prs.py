@@ -1,4 +1,5 @@
 from datetime import timedelta
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session
@@ -10,7 +11,7 @@ from app.api.schemas import (
     PrSuccessRateResponse,
 )
 from app.core.db import get_db
-from app.core.utils import format_time_delta, format_time_difference
+from app.core.utils import format_time_delta, format_time_difference, default_start_date
 from app.repositories.base import RepositoryError
 from app.repositories.prs import (
     fetch_avg_pr_closing_time,
@@ -28,13 +29,15 @@ router = APIRouter(prefix="/stats", tags=["stats"])
 )
 def get_pr_success_rate(
     repo_name: str = Query(..., description="Repository name in format 'owner/repo'"),
+    start_date: Optional[str] = Query(None, description="Start date in format 'YYYY-MM-DD'"),
     db: Session = Depends(get_db),
 ):
     """
     Calculate the percentage of closed PRs that were successfully merged.
     """
     try:
-        success_stats = fetch_pr_success_rate(db, repo_name)
+        start_date_value = start_date or default_start_date()
+        success_stats = fetch_pr_success_rate(db, repo_name, start_date_value)
         if success_stats is None:
             raise HTTPException(
                 status_code=404,
@@ -66,14 +69,15 @@ def get_pr_success_rate(
 )
 def get_pr_avg_closing_time(
     repo_name: str = Query(..., description="Repository name in format 'owner/repo'"),
-    start_date: str = Query("2010-01-01", description="Start date in format 'YYYY-MM-DD'"),
+    start_date: Optional[str] = Query(None, description="Start date in format 'YYYY-MM-DD'"),
     db: Session = Depends(get_db),
 ):
     """
     Calculate average time between PR opening and closing (either merged or closed without merging).
     """
     try:
-        avg_seconds = fetch_avg_pr_closing_time(db, repo_name, start_date)
+        start_date_value = start_date or default_start_date()
+        avg_seconds = fetch_avg_pr_closing_time(db, repo_name, start_date_value)
         if avg_seconds is None:
             raise HTTPException(
                 status_code=404,
@@ -104,13 +108,15 @@ def get_pr_avg_closing_time(
 )
 def get_pr_review_time(
     repo_name: str = Query(..., description="Repository name in format 'owner/repo'"),
+    start_date: Optional[str] = Query(None, description="Start date in format 'YYYY-MM-DD'"),
     db: Session = Depends(get_db),
 ):
     """
     Calculate the average time until the first review for Pull Requests.
     """
     try:
-        avg_seconds, reviewed_count = fetch_pr_review_time(db, repo_name)
+        start_date_value = start_date or default_start_date()
+        avg_seconds, reviewed_count = fetch_pr_review_time(db, repo_name, start_date_value)
         readable_time = (
             format_time_difference(avg_seconds) if avg_seconds is not None else None
         )
@@ -128,4 +134,3 @@ def get_pr_review_time(
             status_code=500,
             detail=f"Error calculating PR review time: {str(e)}",
         )
-

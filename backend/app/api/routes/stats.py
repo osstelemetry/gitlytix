@@ -5,7 +5,7 @@ from sqlmodel import Session
 
 from app.api.schemas import BugResolutionTimeResponse, DataQualityResponse, ErrorResponse
 from app.core.db import get_db
-from app.core.utils import format_time_delta, format_time_difference
+from app.core.utils import format_time_delta, format_time_difference, default_start_date
 from app.repositories.base import RepositoryError
 from app.repositories.stats import (
     fetch_bug_resolution_metrics,
@@ -82,7 +82,7 @@ def get_data_quality(
 )
 def get_bug_avg_resolution_time(
     repo_name: str = Query(..., description="Repository name in format 'owner/repo'"),
-    start_date: str = Query("2010-01-01", description="Start date in format 'YYYY-MM-DD'"),
+    start_date: str | None = Query(None, description="Start date in format 'YYYY-MM-DD'"),
     end_date: str = Query(None, description="End date in format 'YYYY-MM-DD' (defaults to now)"),
     db: Session = Depends(get_db)
 ):
@@ -99,13 +99,18 @@ def get_bug_avg_resolution_time(
     - total_bugs_resolved: Total number of bugs resolved in the time window
     """
     try:
-        end_date = end_date or datetime.utcnow().strftime("%Y-%m-%d")
+        if end_date:
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+        else:
+            end_dt = datetime.utcnow()
+        end_date_value = end_dt.strftime("%Y-%m-%d")
+        start_date_value = start_date or default_start_date(end=end_dt)
         
         avg_seconds, total_bugs = fetch_bug_resolution_metrics(
             db,
             repo_name,
-            start_date,
-            end_date,
+            start_date_value,
+            end_date_value,
         )
 
         if avg_seconds is None:
@@ -119,8 +124,8 @@ def get_bug_avg_resolution_time(
         return {
             "repository": repo_name,
             "period": {
-                "start": start_date,
-                "end": end_date
+                "start": start_date_value,
+                "end": end_date_value
             },
             "average_resolution_time_seconds": avg_seconds,
             "average_resolution_time_readable": format_time_delta(avg_timedelta),
@@ -171,10 +176,12 @@ def get_release_frequency(
         if not end_month:
             end_month = current_month
         if not start_month:
-            # Calculate 12 months before end_month
-            end_date = datetime.strptime(end_month + "-01", "%Y-%m-%d")
-            start_date = (end_date - timedelta(days=365)).strftime("%Y-%m")
+            # Calculate approximately 6 months before end_month
+            end_date_obj = datetime.strptime(end_month + "-01", "%Y-%m-%d")
+            start_date = (end_date_obj - timedelta(days=180)).strftime("%Y-%m")
             start_month = start_date
+        else:
+            end_date_obj = datetime.strptime(end_month + "-01", "%Y-%m-%d")
         
         # Convert YYYY-MM to first day of month for database query
         start_date = f"{start_month}-01"

@@ -1,10 +1,12 @@
-from fastapi import APIRouter, HTTPException, Depends, Query
-from sqlmodel import Session
 from datetime import datetime, timedelta
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlmodel import Session
 
 from app.core.db import get_db
 from app.api.schemas import IssuesOpenClosedMonthlyResponse, ErrorResponse, IssueFirstResponseTimeResponse, IssueAvgResolutionTimeResponse
-from app.core.utils import format_time_delta
+from app.core.utils import format_time_delta, default_start_date
 from app.repositories.base import RepositoryError
 from app.repositories.issues import (
     fetch_average_first_response_seconds,
@@ -90,7 +92,7 @@ def get_open_closed_issues(
 )
 def get_first_response_time(
     repo_name: str = Query(..., description="Repository name in format 'owner/repo'"),
-    start_date: str = Query("2010-01-01", description="Start date in format 'YYYY-MM-DD'"),
+    start_date: Optional[str] = Query(None, description="Start date in format 'YYYY-MM-DD'"),
     exclude_opener_comments: bool = Query(True, description="Exclude comments by the issue opener"),
     db: Session = Depends(get_db)
 ):
@@ -103,10 +105,11 @@ def get_first_response_time(
     - average_response_time_readable: Human-readable average (e.g., "2 hours 30 minutes")
     """
     try:
+        start_date_value = start_date or default_start_date()
         avg_seconds = fetch_average_first_response_seconds(
             db,
             repo_name,
-            start_date,
+            start_date_value,
             exclude_opener_comments,
         )
 
@@ -144,8 +147,9 @@ def get_first_response_time(
 )
 def get_issue_avg_resolution_time(
     repo_name: str = Query(..., description="Repository name in format 'owner/repo'"),
-    start_date: str = Query("2010-01-01", description="Start date in format 'YYYY-MM-DD'"),
+    start_date: Optional[str] = Query(None, description="Start date in format 'YYYY-MM-DD'"),
     end_date: str = Query(None, description="End date in format 'YYYY-MM-DD' (defaults to now)"),
+    label: Optional[str] = Query(None, description="Optional label to filter issues (e.g., 'bug')"),
     db: Session = Depends(get_db)
 ):
     """
@@ -159,13 +163,20 @@ def get_issue_avg_resolution_time(
     - total_issues_resolved: Total number of issues resolved in the time window
     """
     try:
-        end_date = end_date or datetime.utcnow().strftime("%Y-%m-%d")
+        if end_date:
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+        else:
+            end_dt = datetime.utcnow()
+        end_date_value = end_dt.strftime("%Y-%m-%d")
+        start_date_value = start_date or default_start_date(end=end_dt)
         
+        label_filters = [label] if label else None
         avg_seconds, total_issues = fetch_average_resolution_time(
             db,
             repo_name,
-            start_date,
-            end_date,
+            start_date_value,
+            end_date_value,
+            label_filters=label_filters,
         )
 
         if avg_seconds is None:
@@ -179,8 +190,8 @@ def get_issue_avg_resolution_time(
         return {
             "repository": repo_name,
             "period": {
-                "start": start_date,
-                "end": end_date
+                "start": start_date_value,
+                "end": end_date_value
             },
             "average_resolution_time_seconds": avg_seconds,
             "average_resolution_time_readable": format_time_delta(avg_timedelta),
