@@ -19,7 +19,7 @@ make seed
 # Stop everything
 make stop
 
-# Or use the start script that checks if db is avaiable
+# Or use the start script that checks if db is available
 ./start.sh
 ```
 
