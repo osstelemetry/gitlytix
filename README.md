@@ -13,6 +13,9 @@ make start
 # Build images without starting containers
 make build
 
+# (Re)seed ClickHouse demo data (requires ClickHouse running; run `make start` first if needed)
+make seed
+
 # Stop everything
 make stop
 
@@ -35,6 +38,9 @@ This will start:
 # View logs for specific service
 docker compose logs -f frontend
 docker compose logs -f backend
+
+# Rerun seed data against an already running ClickHouse instance
+make seed
 
 # Bring stack up/down directly (equivalent to make targets)
 docker compose up -d
