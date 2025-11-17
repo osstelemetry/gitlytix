@@ -1,11 +1,18 @@
-from fastapi import APIRouter, HTTPException, Depends, Query
-from sqlalchemy import text
-from sqlmodel import Session
 from datetime import datetime, timedelta
 
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlmodel import Session
+
+from app.api.schemas import BugResolutionTimeResponse, DataQualityResponse, ErrorResponse
 from app.core.db import get_db
-from app.api.schemas import ErrorResponse, DataQualityResponse, BugResolutionTimeResponse
 from app.core.utils import format_time_delta, format_time_difference
+from app.repositories.base import RepositoryError
+from app.repositories.stats import (
+    fetch_bug_resolution_metrics,
+    fetch_data_quality_metrics,
+    fetch_new_contributors,
+    fetch_release_frequency,
+)
 
 router = APIRouter(prefix="/stats", tags=["stats"])
 
@@ -31,27 +38,13 @@ def get_data_quality(
     This helps users understand how up-to-date the metrics for a repository are.
     """
     try:
-        query = text(
-            """
-            SELECT 
-                MAX(created_at) as latest_event_time,
-                NOW() - MAX(created_at) as time_since_latest_event
-            FROM github_events
-            WHERE repo_name = :repo_name
-            """
-        )
-        
-        result = db.execute(query, {"repo_name": repo_name})
-        row = result.fetchone()
-        
-        if not row or row[0] is None:
+        metrics = fetch_data_quality_metrics(db, repo_name)
+        if metrics is None:
             raise HTTPException(
                 status_code=404,
                 detail=f"No data found for repository: {repo_name}"
             )
-            
-        latest_event_time = row[0]
-        seconds_since_latest = row[1]
+        latest_event_time, seconds_since_latest = metrics
         
         # Convert seconds to a readable format
         time_since_latest = format_time_difference(seconds_since_latest)
@@ -69,9 +62,14 @@ def get_data_quality(
             "time_since_latest_event": time_since_latest,
             "data_freshness_status": data_freshness_status
         }
+    except HTTPException:
+        raise
+    except RepositoryError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc)
+        )
     except Exception as e:
-        if isinstance(e, HTTPException):
-            raise e
         raise HTTPException(
             status_code=500,
             detail=f"Error retrieving data quality information: {str(e)}"
@@ -103,54 +101,19 @@ def get_bug_avg_resolution_time(
     try:
         end_date = end_date or datetime.utcnow().strftime("%Y-%m-%d")
         
-        query = text("""
-        WITH bug_issues AS (
-            -- Get the first opened and last closed event for each issue
-            SELECT 
-                repo_name,
-                number,
-                minIf(created_at, action = 'opened') as opened_at,
-                maxIf(created_at, action = 'closed') as closed_at,
-                -- Check if any event for this issue had a 'bug' label
-                max(hasAny(labels, ['bug'])) as is_bug
-            FROM github_events
-            WHERE event_type = 'IssuesEvent'
-              AND repo_name = :repo_name
-              AND action IN ('opened', 'closed')
-              AND created_at BETWEEN :start_date AND :end_date
-            GROUP BY repo_name, number
-            HAVING is_bug = 1 AND closed_at IS NOT NULL AND opened_at IS NOT NULL
-        ),
-        resolution_times AS (
-            SELECT
-                repo_name,
-                dateDiff('second', opened_at, closed_at) as resolution_time_seconds
-            FROM bug_issues
-            WHERE resolution_time_seconds > 0  -- Ensure closed after opened
-              AND resolution_time_seconds < 31536000  -- Filter out resolutions > 1 year
-        )
-        SELECT
+        avg_seconds, total_bugs = fetch_bug_resolution_metrics(
+            db,
             repo_name,
-            avg(resolution_time_seconds) as avg_seconds,
-            count() as total_bugs
-        FROM resolution_times
-        GROUP BY repo_name
-        """)
+            start_date,
+            end_date,
+        )
 
-        result = db.execute(query, {
-            "repo_name": repo_name,
-            "start_date": start_date,
-            "end_date": end_date
-        })
-        row = result.fetchone()
-
-        if not row or row[1] is None:
+        if avg_seconds is None:
             raise HTTPException(
                 status_code=404,
                 detail=f"No bug resolution data found for repository: {repo_name}"
             )
 
-        avg_seconds = float(row[1])
         avg_timedelta = timedelta(seconds=avg_seconds)
         
         return {
@@ -161,11 +124,16 @@ def get_bug_avg_resolution_time(
             },
             "average_resolution_time_seconds": avg_seconds,
             "average_resolution_time_readable": format_time_delta(avg_timedelta),
-            "total_bugs_resolved": row[2]
+            "total_bugs_resolved": total_bugs or 0
         }
 
     except HTTPException:
         raise
+    except RepositoryError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc)
+        )
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -212,37 +180,18 @@ def get_release_frequency(
         start_date = f"{start_month}-01"
         end_date = f"{end_month}-01"
         
-        query = text("""
-        WITH release_events AS (
-            SELECT 
-                toStartOfMonth(created_at) as month,
-                count() as releases
-            FROM github_events
-            WHERE event_type = 'ReleaseEvent'
-              AND repo_name = :repo_name
-              AND created_at BETWEEN :start_date AND :end_date
-            GROUP BY month
-            ORDER BY month
-        )
-        SELECT 
-            formatDateTime(month, '%Y-%m') as month_str,
-            releases
-        FROM release_events
-        """)
-
-        result = db.execute(query, {
-            "repo_name": repo_name,
-            "start_date": start_date,
-            "end_date": end_date
-        })
-        
+        rows = fetch_release_frequency(db, repo_name, start_date, end_date)
         data = [
             {"month": row[0], "releases": row[1]}
-            for row in result.fetchall()
+            for row in rows
         ]
-        print('******************', data)
         return data
 
+    except RepositoryError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc)
+        )
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -268,37 +217,14 @@ def get_new_contributors(
     Default time window is 6 months (maximum 24 months allowed).
     """
     try:
-        query = text("""
-        WITH first_contributions AS (
-            SELECT
-                actor_login as username,
-                min(created_at) as first_contribution_date
-            FROM github_events
-            WHERE repo_name = :repo_name
-              AND event_type IN ('PushEvent', 'PullRequestEvent')
-            GROUP BY actor_login
-            HAVING first_contribution_date >= subtractMonths(now(), :months)
-        )
-        SELECT
-            username,
-            first_contribution_date,
-            concat('https://github.com/', username) as profile_url
-        FROM first_contributions
-        ORDER BY first_contribution_date DESC
-        """)
-
-        result = db.execute(query, {
-            "repo_name": repo_name,
-            "months": months
-        })
-        
+        rows = fetch_new_contributors(db, repo_name, months)
         contributors = [
             {
                 "username": row[0],
                 "first_contribution_date": row[1].strftime("%Y-%m-%d"),
                 "profile_url": row[2]
             }
-            for row in result.fetchall()
+            for row in rows
         ]
         
         return {
@@ -308,6 +234,11 @@ def get_new_contributors(
             "contributors": contributors
         }
 
+    except RepositoryError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc)
+        )
     except Exception as e:
         raise HTTPException(
             status_code=500,
