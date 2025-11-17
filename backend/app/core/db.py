@@ -1,6 +1,5 @@
-from sqlmodel import Session, create_engine, SQLModel
+from sqlmodel import Session, create_engine
 from sqlalchemy.orm import sessionmaker
-from clickhouse_sqlalchemy import engines
 
 from app.core.config import settings
 
@@ -13,10 +12,3 @@ SessionLocal = sessionmaker(bind=engine)
 def get_db():
     with Session(engine) as session:
         yield session
-
-# Ensure all tables are created
-def init_db():
-    from app.models import Stats
-    
-    #SQLModel.metadata.create_all(engine)
-
