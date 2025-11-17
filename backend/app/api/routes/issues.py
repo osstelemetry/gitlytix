@@ -1,11 +1,16 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
-from sqlalchemy import text
 from sqlmodel import Session
 from datetime import datetime, timedelta
 
 from app.core.db import get_db
 from app.api.schemas import IssuesOpenClosedMonthlyResponse, ErrorResponse, IssueFirstResponseTimeResponse, IssueAvgResolutionTimeResponse
 from app.core.utils import format_time_delta
+from app.repositories.base import RepositoryError
+from app.repositories.issues import (
+    fetch_average_first_response_seconds,
+    fetch_average_resolution_time,
+    fetch_monthly_open_closed_counts,
+)
 
 router = APIRouter(prefix="/stats", tags=["stats"])
 
@@ -28,31 +33,7 @@ def get_open_closed_issues(
         end_date = datetime.now()
         start_date = end_date - timedelta(days=180)  # ~6 months
         
-        # ClickHouse SQL query
-        query = text(
-            """
-            SELECT
-                toStartOfMonth(created_at) AS month,
-                countIf(action = 'opened') AS opened,
-                countIf(action = 'closed') AS closed
-            FROM github_events
-            WHERE event_type = 'IssuesEvent'
-              AND action IN ('opened', 'closed')
-              AND created_at >= :start_date
-              AND created_at <= :end_date
-              AND repo_name = :repo_name
-            GROUP BY month
-            ORDER BY month
-            """
-        )
-        
-        # Execute query with ClickHouse-compatible date formatting
-        result = db.execute(query, {
-            "repo_name": repo_name,
-            "start_date": start_date,
-            "end_date": end_date
-        })
-        db_results = result.fetchall()
+        db_results = fetch_monthly_open_closed_counts(db, repo_name, start_date, end_date)
         
         # Process results
         monthly_stats = []
@@ -89,6 +70,11 @@ def get_open_closed_issues(
             "data": last_6_months
         }
         
+    except RepositoryError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc)
+        )
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -117,61 +103,18 @@ def get_first_response_time(
     - average_response_time_readable: Human-readable average (e.g., "2 hours 30 minutes")
     """
     try:
-        query = text("""
-        WITH issue_openings AS (
-            SELECT 
-                repo_name,
-                number,
-                created_at as opened_at,
-                actor_login as opener_login
-            FROM github_events
-            WHERE event_type = 'IssuesEvent'
-              AND action = 'opened'
-              AND repo_name = :repo_name
-              AND created_at >= :start_date
-        ),
-        first_comments AS (
-            SELECT
-                io.repo_name,
-                io.number,
-                io.opened_at,
-                MIN(ge.created_at) as first_comment_at
-            FROM issue_openings io
-            JOIN github_events ge ON io.repo_name = ge.repo_name AND io.number = ge.number
-            WHERE ge.event_type = 'IssueCommentEvent'
-              AND ge.action = 'created'
-              AND ge.created_at > io.opened_at
-              {exclude_opener_condition}
-            GROUP BY io.repo_name, io.number, io.opened_at
-        ),
-        response_times AS (
-            SELECT
-                repo_name,
-                dateDiff('second', opened_at, first_comment_at) as response_time_seconds
-            FROM first_comments
-        )
-        SELECT
+        avg_seconds = fetch_average_first_response_seconds(
+            db,
             repo_name,
-            avg(response_time_seconds) as avg_seconds
-        FROM response_times
-        GROUP BY repo_name
-        """.format(
-            exclude_opener_condition="AND ge.actor_login != io.opener_login" if exclude_opener_comments else ""
-        ))
+            start_date,
+            exclude_opener_comments,
+        )
 
-        result = db.execute(query, {
-            "repo_name": repo_name,
-            "start_date": start_date
-        })
-        row = result.fetchone()
-
-        if not row or row[1] is None:
+        if avg_seconds is None:
             raise HTTPException(
                 status_code=404,
                 detail=f"No response data found for issues in repository: {repo_name}"
             )
-
-        avg_seconds = float(row[1])
         avg_timedelta = timedelta(seconds=avg_seconds)
         
         return {
@@ -182,6 +125,11 @@ def get_first_response_time(
 
     except HTTPException:
         raise
+    except RepositoryError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc)
+        )
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -213,62 +161,19 @@ def get_issue_avg_resolution_time(
     try:
         end_date = end_date or datetime.utcnow().strftime("%Y-%m-%d")
         
-        query = text("""
-        WITH issue_events AS (
-            -- Get all open and close events for issues
-            SELECT 
-                repo_name,
-                number,
-                action,
-                created_at,
-                labels
-            FROM github_events
-            WHERE event_type = 'IssuesEvent'
-              AND repo_name = :repo_name
-              AND action IN ('opened', 'closed')
-              AND created_at BETWEEN :start_date AND :end_date
-        ),
-        issue_timings AS (
-            -- Find first open and last close for each issue
-            SELECT
-                repo_name,
-                number,
-                minIf(created_at, action = 'opened') as opened_at,
-                maxIf(created_at, action = 'closed') as closed_at
-            FROM issue_events
-            GROUP BY repo_name, number
-            HAVING opened_at IS NOT NULL AND closed_at IS NOT NULL
-        ),
-        resolution_times AS (
-            -- Calculate resolution time for each issue
-            SELECT
-                repo_name,
-                dateDiff('second', opened_at, closed_at) as resolution_time_seconds
-            FROM issue_timings
-            WHERE resolution_time_seconds > 0  -- Ensure closed after opened
-        )
-        SELECT
+        avg_seconds, total_issues = fetch_average_resolution_time(
+            db,
             repo_name,
-            avg(resolution_time_seconds) as avg_seconds,
-            count() as total_issues
-        FROM resolution_times
-        GROUP BY repo_name
-        """)
+            start_date,
+            end_date,
+        )
 
-        result = db.execute(query, {
-            "repo_name": repo_name,
-            "start_date": start_date,
-            "end_date": end_date
-        })
-        row = result.fetchone()
-
-        if not row or row[1] is None:
+        if avg_seconds is None:
             raise HTTPException(
                 status_code=404,
                 detail=f"No issue resolution data found for repository: {repo_name}"
             )
-
-        avg_seconds = float(row[1])
+        total_resolved = total_issues or 0
         avg_timedelta = timedelta(seconds=avg_seconds)
         
         return {
@@ -279,11 +184,16 @@ def get_issue_avg_resolution_time(
             },
             "average_resolution_time_seconds": avg_seconds,
             "average_resolution_time_readable": format_time_delta(avg_timedelta),
-            "total_issues_resolved": row[2]
+            "total_issues_resolved": total_resolved
         }
 
     except HTTPException:
         raise
+    except RepositoryError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc)
+        )
     except Exception as e:
         raise HTTPException(
             status_code=500,
